@@ -1,6 +1,8 @@
 """Reads the cicuit directory files exported as CSV and put them in
 congregation and people address book csv file."""
 from __future__ import print_function, unicode_literals
+import logging
+import os
 import csv
 
 from nameparser import HumanName
@@ -12,8 +14,8 @@ CONGREGATIONS = ["ca95-appianway.csv", "ca95-bailey.csv", "ca95-berryessa.csv",
 	"ca95-northbay.csv", "ca95-paradisevalleydr.csv", "ca95-pioneerway.csv", "ca95-russpark.csv",
 	"ca95-sierra.csv", "ca95-southshore.csv", "ca95-stonelake.csv", "ca95-story.csv",
 	"ca95-westcloverrd.csv", "ca95-westlake.csv"]
-CONGREGATION_CSV = "ca95-congregations.csv"
-CONTACTS_CSV = "ca95-contacts.csv"
+CONGREGATION_CSV = "ca95_output-congregations.csv"
+CONTACTS_CSV = "ca95_output-contacts.csv"
 
 
 def striptelnum(tel):
@@ -26,7 +28,10 @@ def striptelnum(tel):
 
 
 def readcsvfiles(inputfile, congregationsfile, contactsfile):
-	with open(inputfile, "rb") as csvfile:
+	logger = logging.getLogger('readcsvfiles')
+	inputfilename = os.path.join('data', inputfile)
+	logger.info('Reading congregation CSV file {}...'.format(inputfilename))
+	with open(inputfilename, "rb") as csvfile:
 		reader = csv.reader(csvfile)
 		congregation = {}
 		congregation["name_simple"] = reader.next()[0].strip()
@@ -60,6 +65,7 @@ def readcsvfiles(inputfile, congregationsfile, contactsfile):
 		# close the quote for the notes
 		congregation["notes"] += "\""
 
+		logger.info('Grabbing congregation elder information...')
 		elders = []
 		reader.next()
 		try:
@@ -74,6 +80,7 @@ def readcsvfiles(inputfile, congregationsfile, contactsfile):
 		except StopIteration:
 			pass
 
+		logger.info('Grabbing congregation servants information...')
 		servants = []
 		try:
 			reader.next()
@@ -127,8 +134,10 @@ def readcsvfiles(inputfile, congregationsfile, contactsfile):
 				except UnicodeEncodeError:
 					print("DEBUG: {} / {}".format(fullname.last, eachcontact))
 					raise
+	logger.info('Writing to congregation CSV file...')
 	congregationsfile.write(",,,,,,,,,,,{name},{Phone 1 - Value},,,{complete_addr},US,\"KH,JW\","
 		"{notes}\n".format(**congregation))
+	logger.info('... Done.')
 
 
 def main():
@@ -166,15 +175,23 @@ def main():
 	# 				"Address 1 - Postal Code,Address 1 - Country,Organization 1 - Type,"
 	# 				"Organization 1 - Name,Organization 1 - Title,Organization 1 - Department,"
 	# 				"Organization 1 - Location,Organization 1 - Job Description\n"
+	logger = logging.getLogger()
+	logger.setLevel(logging.DEBUG)
+	handler = logging.StreamHandler()
+	handler.setLevel(logging.DEBUG)
+	logger.addHandler(handler)
 
-	with open(CONGREGATION_CSV, "w") as congregationsfile:
-		with open(CONTACTS_CSV, "w") as contactsfile:
+	congregation_csv = os.path.join('data', CONGREGATION_CSV)
+	contacts_csv = os.path.join('data', CONTACTS_CSV)
+	logger.info('Creating {}...'.format(congregation_csv))
+	with open(congregation_csv, "w") as congregationsfile:
+		logger.info('Creating {}...'.format(contacts_csv))
+		with open(contacts_csv, "w") as contactsfile:
 			for outfile in [congregationsfile, contactsfile]:
 				outfile.write("First Name,Middle Name,Last Name,Suffix,Title,Location,"
 					"E-mail Address,Home Phone,Mobile Phone,Home Address,"
 					"Home Country,Company,Business Phone,Job Title,Department,"
 					"Business Address,Business Country,Keywords,Notes\n")
-
 			for eachfile in CONGREGATIONS:
 				readcsvfiles(eachfile, congregationsfile, contactsfile)
 
