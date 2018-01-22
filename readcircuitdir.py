@@ -1,19 +1,16 @@
 """Reads the cicuit directory files exported as CSV and put them in
 congregation and people address book csv file."""
 from __future__ import print_function, unicode_literals
+import glob
 import logging
 import os
 import csv
 
+import openpyxl
+
 from nameparser import HumanName
 from address import AddressParser
 
-CONGREGATIONS = ["ca95-appianway.csv", "ca95-bailey.csv", "ca95-berryessa.csv",
-	"ca95-crystalsprings.csv", "ca95-folsomlake.csv", "ca95-goldengate.csv", "ca95-hallave.csv",
-	"ca95-lakeelizabeth.csv", "ca95-lawlerranchpkwy.csv", "ca95-marconi.csv", "ca95-north.csv",
-	"ca95-northbay.csv", "ca95-paradisevalleydr.csv", "ca95-pioneerway.csv", "ca95-russpark.csv",
-	"ca95-sierra.csv", "ca95-southshore.csv", "ca95-stonelake.csv", "ca95-story.csv",
-	"ca95-westcloverrd.csv", "ca95-westlake.csv"]
 CONGREGATION_CSV = "ca95_output-congregations.csv"
 CONTACTS_CSV = "ca95_output-contacts.csv"
 
@@ -140,6 +137,61 @@ def readcsvfiles(inputfile, congregationsfile, contactsfile):
 	logger.info('... Done.')
 
 
+def extractcsv(xlsx, prefix):
+	"""Extract all the congregation worksheet as CSV file.
+
+	Args:
+	- `xlsx` (`str`): Excel spreadsheet.  See Notes.
+
+	Returns:
+	- `list(str)`: list of filename
+
+	Notes:
+	- Workbook must not be password protected.  That means, the original
+	workbook must be opened prior and save to another file without the password.
+	The new workbook must have `-nopasswd` before the extension.  The workbook
+	without password will be deleted after a successful call.  This will make
+	sure that the workbook contents are kept secured in the original file only.
+	"""
+	logger = logging.getLogger('extractcsv')
+	EXCLUDE_WORKSHEET = ['memo', 'cover', 'congs', 'revision log']
+	logger.info('Opening workbook {}...'.format(xlsx))
+	if '-nopasswd.' not in xlsx:
+		errmsg = 'Filename should be in *-nopassword.xlsx format.'
+		logger.error(errmsg)
+		raise ValueError(errmsg)
+	
+	workbook = openpyxl.load_workbook(xlsx)
+	worksheets = [each for each in workbook.sheetnames if each.lower() not in EXCLUDE_WORKSHEET]
+	ret = []
+	for sheetname in worksheets:
+		fname = '{}{}.csv'.format(prefix, filter(lambda x: x in [chr(each)
+			for each in range(ord('a'), ord('z') + 1)], sheetname.lower()))
+		ret.append(fname)
+		logger.info('Opening sheetname {}...'.format(sheetname))
+		sheet = workbook[sheetname]
+		logger.info('... creating csv file {}...'.format(fname))
+		with open(os.path.join('data', fname), 'wb') as csvhandle:
+			csvobj = csv.writer(csvhandle)
+			for row in sheet.rows:
+				newrow = []
+				for cell in row:
+					if cell.value is None:
+						newrow.append('')
+					elif isinstance(cell.value, (unicode, str)):
+						newrow.append(cell.value.encode('utf-8').strip())
+					else:
+						newrow.append(cell.value)
+				csvobj.writerow(newrow)
+				# csvobj.writerow(['' if cell.value is None else cell.value.encode('utf-8').strip()
+				#	for cell in row])
+	workbook.close()
+	logger.info('Deleting {}...'.format(xlsx))
+	os.unlink(xlsx)
+	logger.info('Done.')
+	return ret
+
+
 def main():
 	"""Main program"""
 	# outlook CSV fields:
@@ -181,6 +233,9 @@ def main():
 	handler.setLevel(logging.DEBUG)
 	logger.addHandler(handler)
 
+	congregations = extractcsv(glob.glob(os.path.join('data', 'CA-95-*-nopasswd.xlsx'))[0], 'ca95-')
+	extractcsv(glob.glob(os.path.join('data', 'Approved*-nopasswd.xlsx'))[0], 'ca95talks-')
+
 	congregation_csv = os.path.join('data', CONGREGATION_CSV)
 	contacts_csv = os.path.join('data', CONTACTS_CSV)
 	logger.info('Creating {}...'.format(congregation_csv))
@@ -192,7 +247,7 @@ def main():
 					"E-mail Address,Home Phone,Mobile Phone,Home Address,"
 					"Home Country,Company,Business Phone,Job Title,Department,"
 					"Business Address,Business Country,Keywords,Notes\n")
-			for eachfile in CONGREGATIONS:
+			for eachfile in congregations:
 				readcsvfiles(eachfile, congregationsfile, contactsfile)
 
 if __name__ == "__main__":
