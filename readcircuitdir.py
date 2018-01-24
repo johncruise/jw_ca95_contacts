@@ -5,6 +5,7 @@ import glob
 import logging
 import os
 import csv
+import re
 
 import openpyxl
 
@@ -13,6 +14,7 @@ from address import AddressParser
 
 CONGREGATION_CSV = "ca95_output-congregations.csv"
 CONTACTS_CSV = "ca95_output-contacts.csv"
+PTC_CSV = 'ca95_output-ptc.csv'
 
 
 def striptelnum(tel):
@@ -24,7 +26,7 @@ def striptelnum(tel):
 	return tel
 
 
-def readcsvfiles(inputfile, congregationsfile, contactsfile):
+def createcircuitcsv(inputfile, congregationsfile, contactsfile):
 	logger = logging.getLogger('readcsvfiles')
 	inputfilename = os.path.join('data', inputfile)
 	logger.info('Reading congregation CSV file {}...'.format(inputfilename))
@@ -160,7 +162,7 @@ def extractcsv(xlsx, prefix):
 		errmsg = 'Filename should be in *-nopassword.xlsx format.'
 		logger.error(errmsg)
 		raise ValueError(errmsg)
-	
+
 	workbook = openpyxl.load_workbook(xlsx)
 	worksheets = [each for each in workbook.sheetnames if each.lower() not in EXCLUDE_WORKSHEET]
 	ret = []
@@ -184,12 +186,120 @@ def extractcsv(xlsx, prefix):
 						newrow.append(cell.value)
 				csvobj.writerow(newrow)
 				# csvobj.writerow(['' if cell.value is None else cell.value.encode('utf-8').strip()
-				#	for cell in row])
+				# 	for cell in row])
 	workbook.close()
 	logger.info('Deleting {}...'.format(xlsx))
 	os.unlink(xlsx)
 	logger.info('Done.')
 	return ret
+
+
+def is_eldersrow(row):
+	"""Check if CSV row is an elder's row."""
+	return row[0].startswith('ELDERS')
+
+
+def is_msrow(row):
+	"""Check if CSV row is an MS row."""
+	return row[0].startswith('MINISTERIAL SERVANTS')
+
+
+def is_newsection(row):
+	"""Check if CSV in new section"""
+	return row[0].startswith('ELDERS') or row[0].startswith('MINISTERIAL ') or \
+		row[0].startswith('Revised')
+
+
+def decoderow(row):
+	"""Decode all rows string data."""
+	return [each.decode(errors='ignore').strip() for each in row]
+
+
+def is_empty(row):
+	"""Checks if row is empty"""
+	return sum([len(each) for each in row]) == 0
+
+
+def get_contacttype(key, value):
+	"""Check the cell data to see type of contact information.
+
+	Args:
+	- `key` (`str`): self-explained
+	- `value` (`str`): self-explained
+
+	Returns:
+	- `str`: key for the dictionary
+	"""
+	key = key.lower()
+	if key in ['cell', 'home', 'mobile']:
+		return key + '#', striptelnum(value)
+	return key, value
+
+
+def get_ptcdata(row, reader):
+	"""Retrieves the PTC data.
+
+	Args:
+	- `row` (`csv row object`): current row object
+	- `reader` (`csv object`): self-explained
+
+	Returns:
+	- `tuple` (`?`)
+	"""
+	row = decoderow(row)
+	name = HumanName(row[0])
+	data = {'lastname': name.last, 'firstname': name.first, 'middlename': name.middle,
+		'suffixname': name.suffix,
+		'name': '\"{}, {} {}\"'.format(name.last, name.first, name.middle),
+		'talks:': filter(lambda x: x != '"', row[3])}
+	key, value = get_contacttype(row[1:3])
+	data[key] = value
+	for row in reader:
+		row = decoderow(row)
+		if is_empty(row):
+			return data
+		if row[0]:
+			data['role'] = row[0]  # this will overwrite role data if it has one already
+		if row[1]:
+			key, value = get_contacttype(row[1:3])
+			data[key] = value
+		if row[3]:
+			if data['talks'][-1] != ',':
+				data['talks'] += ', '
+			data['talks'] += filter(lambda x: x != '"', row[3])
+
+
+def createptccsv(inputfile, ptcfile):
+	"""Creates a PTC CSV file.
+
+	Args:
+	- `inputfile` (`str`): input file name
+	- `ptcfile` (`file handle`): handle of the output PTC file
+	"""
+	logger = logging.getLogger('createptccsv')
+	inputfilename = os.path.join('data', inputfile)
+	logger.info('Reading PTC CSV file {}...'.format(inputfilename))
+	congregation = re.match('ca95talks-(.+).csv', inputfile)[1]
+	with open(inputfilename, 'rb') as csvfile:
+		reader = csv.reader(csvfile)
+		for row in reader:
+			if is_eldersrow(row):
+				break
+
+	# read the elders data
+	for privilege in ['Elder', 'MS']:
+		for row in reader:
+			row = decoderow(row)
+			if is_empty(row):
+				continue
+			elif is_newsection(row):
+				break
+			data = get_ptcdata(row, reader)
+			data['keywords'] = '"JW,{}"'.format(privilege)
+			data['notes'] = ','.join([data['role', congregation)])
+			ptcfile.write('{firstname},{middlename},{lastname},{suffixname},,,{email1},{home#},'
+				'{cell#},{complete_addr},US,,,,,,,{keywords},{notes}\n'.format(**data))
+	logger.info('... Done')
 
 
 def main():
@@ -234,7 +344,7 @@ def main():
 	logger.addHandler(handler)
 
 	congregations = extractcsv(glob.glob(os.path.join('data', 'CA-95-*-nopasswd.xlsx'))[0], 'ca95-')
-	extractcsv(glob.glob(os.path.join('data', 'Approved*-nopasswd.xlsx'))[0], 'ca95talks-')
+	ptcs = extractcsv(glob.glob(os.path.join('data', 'Approved*-nopasswd.xlsx'))[0], 'ca95talks-')
 
 	congregation_csv = os.path.join('data', CONGREGATION_CSV)
 	contacts_csv = os.path.join('data', CONTACTS_CSV)
@@ -248,7 +358,17 @@ def main():
 					"Home Country,Company,Business Phone,Job Title,Department,"
 					"Business Address,Business Country,Keywords,Notes\n")
 			for eachfile in congregations:
-				readcsvfiles(eachfile, congregationsfile, contactsfile)
+				createcircuitcsv(eachfile, congregationsfile, contactsfile)
+
+	ptc_csv = os.path.join('data', PTC_CSV)
+	logger.info('Creating {}...'.format(ptc_csv))
+	with open(ptc_csv, 'w') as ptcfile:
+		outfile.write('First Name,Middle Name,Last Name,Suffix,Title,Location,'
+			'E-mail address,Home Phone,Mobile Phone,Home Address,'
+			'Home Country,Company,Business Phone,Job Title,Department,'
+			'Business Address,Business Country,Keywords,Notes\n')
+		for eachfile in ptcs:
+			createptccsv(eachfile, ptcfile)
 
 if __name__ == "__main__":
 	main()
