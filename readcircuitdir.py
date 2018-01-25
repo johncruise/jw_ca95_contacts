@@ -11,6 +11,7 @@ import openpyxl
 
 from nameparser import HumanName
 from address import AddressParser
+import phonenumbers
 
 CONGREGATION_CSV = "ca95_output-congregations.csv"
 CONTACTS_CSV = "ca95_output-contacts.csv"
@@ -204,8 +205,9 @@ def is_msrow(row):
 
 def is_newsection(row):
 	"""Check if CSV in new section"""
-	return row[0].startswith('ELDERS') or row[0].startswith('MINISTERIAL ') or \
-		row[0].startswith('Revised')
+	cell = row[0].lower()
+	return cell.startswith('elders') or cell.startswith('ministerial ') or \
+		cell.startswith('revised') or cell.startswith('rev ')
 
 
 def decoderow(row):
@@ -228,9 +230,12 @@ def get_contacttype(key, value):
 	Returns:
 	- `str`: key for the dictionary
 	"""
+	# logger = logging.getLogger('get_contacttype')
 	key = key.lower()
-	if key in ['cell', 'home', 'mobile']:
-		return key + '#', striptelnum(value)
+	if key in ['cell', 'home', 'mobile'] and value is not None:
+		# logger.debug('Phone ... {!r} / {!r}'.format(key, value))
+		return key + '#', striptelnum(phonenumbers.format_number(phonenumbers.parse(value, 'US'),
+			phonenumbers.PhoneNumberFormat.NATIONAL))
 	return key, value
 
 
@@ -245,24 +250,28 @@ def get_ptcdata(row, reader):
 	- `tuple` (`?`)
 	"""
 	row = decoderow(row)
-	name = HumanName(row[0])
-	data = {'lastname': name.last, 'firstname': name.first, 'middlename': name.middle,
-		'suffixname': name.suffix, 'complete_addr': '', 'role': '', 'home#': '',
+	name = HumanName(filter(lambda x: x != '*', row[0]))
+	data = {'fullname': '"{}"'.format(name.full_name), 'lastname': name.last,
+		'firstname': name.first, 'middlename': name.middle, 'suffixname': name.suffix,
+		'complete_addr': '', 'role': '', 'home#': '',
 		'name': '\"{}, {} {}\"'.format(name.last, name.first, name.middle),
-		'talks': filter(lambda x: x != '"', row[3]), 'cell#': ''}
-	key, value = get_contacttype(*row[1:3])
-	data[key] = value
+		'talks': filter(lambda x: x != '"', row[3]).strip(), 'cell#': ''}
+	if row[2] not in [None, 'None', '']:
+		key, value = get_contacttype(*row[1:3])
+		data[key] = value
 	for row in reader:
 		row = decoderow(row)
 		if is_empty(row):
 			break
 		if row[0]:
-			data['role'] = row[0]  # this will overwrite role data if it has one already
+			# this will overwrite role data if it has one already
+			data['role'] = '"{}"'.format(filter(lambda x: x not in ['(', ')'], row[0]).upper())
 		if row[1]:
-			key, value = get_contacttype(*row[1:3])
-			data[key] = value
+			if row[2] not in [None, 'None', '']:
+				key, value = get_contacttype(*row[1:3])
+				data[key] = value
 		if row[3]:
-			if data['talks'][-1] != ',':
+			if len(data['talks']) > 0 and data['talks'][-1] != ',':
 				data['talks'] += ', '
 			data['talks'] += filter(lambda x: x != '"', row[3])
 	return data
@@ -295,11 +304,15 @@ def createptccsv(inputfile, ptcfile):
 					break
 				data = get_ptcdata(row, reader)
 				data['keywords'] = '"JW,{}"'.format(privilege)
-				data['notes'] = ','.join([data['role'], congregation])
+				# if data['role']:
+				# 	data['notes'] = '"{}"'.format(','.join([data['role'], 'Congregation: ' + congregation]))
+				# else:
+				# 	data['notes'] = 'Congregation: ' + congregation
 				if 'email1' not in data:
 					data['email1'] = '' if 'email' not in data else data['email']
-				ptcfile.write('{firstname},{middlename},{lastname},{suffixname},,,{email1},'
-					'{home#},{cell#},{complete_addr},US,,,,,,,{keywords},{notes}\n'.format(**data))
+				ptcfile.write('{fullname},{firstname},{middlename},{lastname},{suffixname},'
+					'{role},{congregation},{email1},{home#},{cell#},"{talks}",'
+					'{keywords},\n'.format(congregation=congregation, **data))
 	logger.info('... Done')
 
 
@@ -349,27 +362,26 @@ def main():
 	congregations = extractcsv(xlsxs[0], 'ca95-')
 	ptcs = extractcsv(xlsxs[1], 'ca95talks-')
 
-	congregation_csv = os.path.join('data', CONGREGATION_CSV)
-	contacts_csv = os.path.join('data', CONTACTS_CSV)
-	logger.info('Creating {}...'.format(congregation_csv))
-	with open(congregation_csv, "w") as congregationsfile:
-		logger.info('Creating {}...'.format(contacts_csv))
-		with open(contacts_csv, "w") as contactsfile:
-			for outfile in [congregationsfile, contactsfile]:
-				outfile.write("First Name,Middle Name,Last Name,Suffix,Title,Location,"
-					"E-mail Address,Home Phone,Mobile Phone,Home Address,"
-					"Home Country,Company,Business Phone,Job Title,Department,"
-					"Business Address,Business Country,Keywords,Notes\n")
-			for eachfile in congregations:
-				createcircuitcsv(eachfile, congregationsfile, contactsfile)
+	if False:
+		congregation_csv = os.path.join('data', CONGREGATION_CSV)
+		contacts_csv = os.path.join('data', CONTACTS_CSV)
+		logger.info('Creating {}...'.format(congregation_csv))
+		with open(congregation_csv, "w") as congregationsfile:
+			logger.info('Creating {}...'.format(contacts_csv))
+			with open(contacts_csv, "w") as contactsfile:
+				for outfile in [congregationsfile, contactsfile]:
+					outfile.write("First Name,Middle Name,Last Name,Suffix,Title,Location,"
+						"E-mail Address,Home Phone,Mobile Phone,Home Address,"
+						"Home Country,Company,Business Phone,Job Title,Department,"
+						"Business Address,Business Country,Keywords,Notes\n")
+				for eachfile in congregations:
+					createcircuitcsv(eachfile, congregationsfile, contactsfile)
 
 	ptc_csv = os.path.join('data', PTC_CSV)
 	logger.info('Creating {}...'.format(ptc_csv))
 	with open(ptc_csv, 'w') as ptcfile:
-		ptcfile.write('First Name,Middle Name,Last Name,Suffix,Title,Location,'
-			'E-mail address,Home Phone,Mobile Phone,Home Address,'
-			'Home Country,Company,Business Phone,Job Title,Department,'
-			'Business Address,Business Country,Keywords,Notes\n')
+		ptcfile.write('Full Name,First Name,Middle Name,Last Name,Suffix,Title,Location,'
+			'E-mail address,Home Phone,Mobile Phone,Talks,Notes\n')
 		for eachfile in ptcs:
 			createptccsv(eachfile, ptcfile)
 
