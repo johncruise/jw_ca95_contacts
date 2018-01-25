@@ -349,20 +349,19 @@ def main():
 	congregations = extractcsv(xlsxs[0], 'ca95-')
 	ptcs = extractcsv(xlsxs[1], 'ca95talks-')
 
-	if False:
-		congregation_csv = os.path.join('data', CONGREGATION_CSV)
-		contacts_csv = os.path.join('data', CONTACTS_CSV)
-		logger.info('Creating {}...'.format(congregation_csv))
-		with open(congregation_csv, "w") as congregationsfile:
-			logger.info('Creating {}...'.format(contacts_csv))
-			with open(contacts_csv, "w") as contactsfile:
-				for outfile in [congregationsfile, contactsfile]:
-					outfile.write("First Name,Middle Name,Last Name,Suffix,Title,Location,"
-						"E-mail Address,Home Phone,Mobile Phone,Home Address,"
-						"Home Country,Company,Business Phone,Job Title,Department,"
-						"Business Address,Business Country,Keywords,Notes\n")
-				for eachfile in congregations:
-					createcircuitcsv(eachfile, congregationsfile, contactsfile)
+	congregation_csv = os.path.join('data', CONGREGATION_CSV)
+	contacts_csv = os.path.join('data', CONTACTS_CSV)
+	logger.info('Creating {}...'.format(congregation_csv))
+	with open(congregation_csv, "w") as congregationsfile:
+		logger.info('Creating {}...'.format(contacts_csv))
+		with open(contacts_csv, "w") as contactsfile:
+			for outfile in [congregationsfile, contactsfile]:
+				outfile.write("First Name,Middle Name,Last Name,Suffix,Title,Location,"
+					"E-mail Address,Home Phone,Mobile Phone,Home Address,"
+					"Home Country,Company,Business Phone,Job Title,Department,"
+					"Business Address,Business Country,Keywords,Notes\n")
+			for eachfile in congregations:
+				createcircuitcsv(eachfile, congregationsfile, contactsfile)
 
 	ptc_csv = os.path.join('data', PTC_CSV)
 	logger.info('Creating {}...'.format(ptc_csv))
